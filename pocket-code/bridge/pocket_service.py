@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """User-owned Linux service manager. No sudo or third-party packages."""
-import argparse, fcntl, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request
+import argparse, fcntl, http.client, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request
 HOME_DIR=pathlib.Path(os.environ.get('POCKET_CODE_HOME',pathlib.Path.home()/'.local/share/pocket-code')).expanduser().absolute()
 CONFIG=HOME_DIR/'config.json'; KEY=HOME_DIR/'connection.key'; STATE=HOME_DIR/'process.json'
 BRIDGE=HOME_DIR/'pocket_bridge.py'; LOG=HOME_DIR/'service.log'
@@ -73,7 +73,8 @@ def start():
 def stop():
     c=config()
     if not healthy(c):print('服务已经停止或未响应');STATE.unlink(missing_ok=True);return
-    local_request(c,'service/stop',True)
+    try:local_request(c,'service/stop',True)
+    except http.client.IncompleteRead:pass  # The server can close after accepting shutdown.
     for _ in range(50):
         if not healthy(c):break
         time.sleep(0.1)
