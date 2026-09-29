@@ -1,0 +1,28 @@
+name: Build IPA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.zip"
+      - ".github/workflows/build-ios.yml"
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source
+        run: unzip -q AmneziaWG-iOS12-arm64-source (8).zip -d source
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build unsigned IPA
+        working-directory: source/CodeSpacePocket
+        run: bash scripts/build-unsigned.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeSpacePocket-unsigned
+          path: source/CodeSpacePocket/dist/AmneziaWG-iOS12t-unsigned.ipa
+          if-no-files-found: error
