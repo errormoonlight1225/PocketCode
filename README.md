@@ -102,4 +102,4 @@ python3 pocket-code/bridge/test_bridge.py
 
 `pocket-code/`、`install.sh` 和本说明按 [MIT](pocket-code/LICENSE) 开源。GitHub 及 Codespaces 的商标归各自权利人所有。
 
-本仓库专用于 Pocket Code。旧 Ipa-Build 仓库保持独立，开发以这里的完整源码为准。
+旧仓库文件已按原路径收录于 [`legacy/Ipa-Build/`](legacy/Ipa-Build/)，作为历史版本保留。当前开发、安装和构建以根目录及 `pocket-code/` 为准。
