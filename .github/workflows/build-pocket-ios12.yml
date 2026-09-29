@@ -1,0 +1,34 @@
+name: Pocket Code iOS 12
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'pocket-code/**'
+      - 'install.sh'
+      - '.github/workflows/build-pocket-ios12.yml'
+permissions:
+  contents: read
+jobs:
+  service-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n install.sh
+      - run: python3 pocket-code/bridge/test_installer.py
+      - run: python3 pocket-code/bridge/test_bridge.py
+  build:
+    needs: service-tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build native iOS 12 IPA
+        working-directory: pocket-code
+        run: bash scripts/build-unsigned.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketCode-iOS12-unsigned
+          path: pocket-code/dist/CodeSpacePocket-unsigned.ipa
+          if-no-files-found: error
