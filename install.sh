@@ -28,7 +28,7 @@ export POCKET_CODE_HOME="$install_dir"
 python3 - "$install_dir" "$bin_dir" "$source_dir" <<'PY'
 import hashlib,os,pathlib,shlex,stat,sys,tempfile,urllib.request
 home=pathlib.Path(sys.argv[1]).expanduser().absolute();bindir=pathlib.Path(sys.argv[2]).expanduser().absolute();source=sys.argv[3]
-checks={'pocket_bridge.py': '87b33aa828df0636e45542d037ac12eeda2154de1e6bad6ece56235c2a8da559', 'pocket_service.py': '058f14ffaaa33f254daf4a9334a2348b0d6e044e64851b17d0b0444ff9897c1a'}
+checks={'pocket_bridge.py': '87b33aa828df0636e45542d037ac12eeda2154de1e6bad6ece56235c2a8da559', 'pocket_service.py': 'b8fef7f5fddf25a170c95831bc6f388820de1d2a924ce33e3839d6b935e504f6'}
 if home.is_symlink():raise SystemExit('安装目录不能是符号链接')
 home.mkdir(parents=True,exist_ok=True,mode=0o700)
 if home.stat().st_uid!=os.getuid():raise SystemExit('安装目录必须属于当前用户')
