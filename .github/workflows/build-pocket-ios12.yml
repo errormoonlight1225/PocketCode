@@ -18,10 +18,14 @@ jobs:
       - run: python3 pocket-code/bridge/test_bridge.py
   build:
     needs: service-tests
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Verify App Store SDK
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version | awk -F. '{ if ($1 < 26) exit 1 }'
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Build native iOS 12 IPA
