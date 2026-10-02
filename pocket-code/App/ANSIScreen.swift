@@ -13,20 +13,38 @@ final class ANSIScreen {
     var pending: [UInt8] = []
     var response: ((Data) -> Void)?
     var wrapPending = false
-    func reset() { grid = Array(repeating: blank(), count: rows); x = 0; y = 0; top = 0; bottom = rows - 1; state = 0; history = []; alternate = nil; wrapPending = false }
+    var bracketedPaste = false
+    func reset() { grid = Array(repeating: blank(), count: rows); x = 0; y = 0; top = 0; bottom = rows - 1; state = 0; history = []; alternate = nil; wrapPending = false; bracketedPaste = false }
     func blank() -> [String] { Array(repeating: " ", count: cols) }
     func resize(_ width: Int, _ height: Int) {
         let width = max(10, width), height = max(3, height)
         guard width != cols || height != rows else { return }
+        // Keep the cursor and bottom output visible when the keyboard reduces the rows.
+        let removed = max(0, y - height + 1)
+        if removed > 0 {
+            if alternate == nil { history.append(contentsOf: grid.prefix(removed).map { $0.joined() }); trimHistory() }
+            grid.removeFirst(removed); y -= removed; savedY = max(0, savedY - removed)
+        }
         cols = width; rows = height
         grid = Array(grid.prefix(rows)).map { Array(($0 + blank()).prefix(cols)) }
         while grid.count < rows { grid.append(blank()) }
         if let a = alternate { var b = Array(a.prefix(rows)).map { Array(($0 + blank()).prefix(cols)) }; while b.count < rows { b.append(blank()) }; alternate = b }
-        x = min(x, cols - 1); y = min(y, rows - 1); top = 0; bottom = rows - 1; wrapPending = false
+        x = min(x, cols - 1); y = min(y, rows - 1); savedX = min(savedX, cols - 1); savedY = min(savedY, rows - 1)
+        top = 0; bottom = rows - 1; wrapPending = false
+    }
+    func trimHistory() { if history.count > 2000 { history.removeFirst(history.count - 2000) } }
+    func pasteData(_ text: String) -> Data {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        let value = bracketedPaste ? "\u{1b}[200~" + normalized + "\u{1b}[201~" : normalized.replacingOccurrences(of: "\n", with: "\r")
+        return Data(value.utf8)
+    }
+    var cursorOffset: Int {
+        let lines = (alternate == nil ? history : []) + grid.prefix(y).map { $0.joined() }
+        return lines.reduce(0) { $0 + $1.utf16.count + 1 } + grid[y].prefix(x).joined().utf16.count
     }
     func scroll() {
         let removed = grid.remove(at: top)
-        if top == 0 && bottom == rows - 1 && alternate == nil { history.append(removed.joined()); if history.count > 300 { history.removeFirst(history.count - 300) } }
+        if top == 0 && bottom == rows - 1 && alternate == nil { history.append(removed.joined()); trimHistory() }
         grid.insert(blank(), at: bottom)
     }
     func newline() { if y == bottom { scroll() } else { y = min(rows - 1, y + 1) }; wrapPending = false }
@@ -101,7 +119,9 @@ final class ANSIScreen {
         case "u": x = min(cols - 1, savedX); y = min(rows - 1, savedY)
         case "n": if at(0) == 6 { response?(Data("\u{1b}[\(y + 1);\(x + 1)R".utf8)) } else if at(0) == 5 { response?(Data("\u{1b}[0n".utf8)) }
         case "c": response?(Data("\u{1b}[?1;2c".utf8))
-        case "h", "l": if privateMode && parts.contains(where: { [47, 1047, 1049].contains($0) }) {
+        case "h", "l":
+            if privateMode && parts.contains(2004) { bracketedPaste = final == "h" }
+            if privateMode && parts.contains(where: { [47, 1047, 1049].contains($0) }) {
             if final == "h" && alternate == nil { alternate = grid; savedX = x; savedY = y; grid = Array(repeating: blank(), count: rows); x = 0; y = 0 }
             else if final == "l", let old = alternate { grid = old; alternate = nil; x = min(cols - 1, savedX); y = min(rows - 1, savedY) }
         }
