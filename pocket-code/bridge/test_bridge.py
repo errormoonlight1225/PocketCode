@@ -32,6 +32,17 @@ class BridgeTests(unittest.TestCase):
    if b'POCKET_READY' in result:break
    time.sleep(.1)
   self.assertIn(b'POCKET_READY',result);self.call('/terminal/close',{'id':sid})
+ def test_initial_terminal_size(self):
+  sid=self.call('/terminal/new',{'cols':58,'rows':29})['id']
+  command="printf 'BOOT_SIZE:'; stty size\n"
+  self.call('/terminal/write',{'id':sid,'data':base64.b64encode(command.encode()).decode()})
+  result=b''
+  for _ in range(30):
+   result=base64.b64decode(self.call('/terminal/read?id='+sid+'&offset=0')['data'])
+   if b'BOOT_SIZE:29 58' in result:break
+   time.sleep(.1)
+  self.assertIn(b'BOOT_SIZE:29 58',result)
+  self.call('/terminal/close',{'id':sid})
  def test_git(self):
   for args in [['init'],['config','user.email','test@example.invalid'],['config','user.name','Test']]:subprocess.run(['git','-C',str(self.root)]+args,check=True,capture_output=True)
   self.call('/git',{'action':'commit','message':'Initial'})
