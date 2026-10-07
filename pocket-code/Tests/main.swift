@@ -59,3 +59,11 @@ check(cleanSession.x == cleanSession.cols - 1, "Large CSI parameters must clamp 
 check(ANSIScreen.cells("你a") == ["你", "", "a"], "Scrollback must retain double-width columns")
 check(ANSIScreen.cells("e\u{301}x").count == 2, "Combining accents must occupy one terminal cell")
 print("PASS: isolated sessions, cursor visibility, hostile CSI bounds and drawing cell widths")
+
+check(Pocket.responseError(status: 401, json: ["error": "连接密钥无效"], bridge: true).message == "连接密钥无效", "Preserve Bridge key rejection")
+check(Pocket.responseError(status: 401, json: nil, bridge: true).message.contains("无法验证 Bridge 密钥"), "Gateway rejection must not blame a saved Bridge key")
+check(Pocket.responseError(status: 401, json: ["message": "Bad credentials"], bridge: false).message.contains("重新登录"), "GitHub expired credentials must have an actionable login error")
+check(Pocket.responseError(status: 302, json: nil, bridge: true).message.contains("要求登录"), "Private port redirect must request authentication without following redirects")
+check(Pocket.responseError(status: 502, json: nil, bridge: true).message.contains("Bridge 正在运行"), "Unavailable service must not ask users to replace a key")
+check(Pocket.responseError(status: 409, json: ["error": "文件已在远端修改"], bridge: true).message.contains("远端修改"), "Preserve file conflict errors")
+print("PASS: separate GitHub authorization, Bridge key rejection, private redirects and stopped services")

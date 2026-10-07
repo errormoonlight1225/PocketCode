@@ -72,14 +72,31 @@ final class Pocket {
         key = newKey.trimmingCharacters(in: .whitespacesAndNewlines); address = next
         UserDefaults.standard.set(address, forKey: "bridgeURL")
     }
+    static func responseError(status: Int, json: JSON?, bridge: Bool) -> PocketError {
+        let message = (json?["message"] as? String) ?? (json?["error_description"] as? String) ?? (json?["error"] as? String)
+        // Bridge JSON errors identify a key rejection. A gateway rejection cannot establish that the key was checked.
+        if bridge, let message = message { return PocketError(message: message) }
+        if status == 401 {
+            return PocketError(message: bridge ? "GitHub 私有端口拒绝授权（HTTP 401）。请重新登录 GitHub 后连接；若仍失败，请检查该账号对工作区的访问权限。此响应无法验证 Bridge 密钥。" : "GitHub 登录授权已失效（HTTP 401）。请在「连接」重新登录 GitHub；工作区地址和 Bridge 密钥会保留。")
+        }
+        if bridge && (300..<400).contains(status) {
+            return PocketError(message: "GitHub 私有端口要求登录。请在「连接」重新登录 GitHub，然后连接工作区。")
+        }
+        if let message = message { return PocketError(message: message) }
+        if bridge && [404, 502, 503, 504].contains(status) {
+            return PocketError(message: "工作区或 Bridge 暂不可用（HTTP \(status)）。请确认 Codespace 已启动、Bridge 正在运行且端口已转发，再重试连接。")
+        }
+        return PocketError(message: "服务器拒绝请求（HTTP \(status)）。请重试或检查该账号的访问权限。")
+    }
     @discardableResult func send(_ req: URLRequest, completion: @escaping Reply) -> URLSessionDataTask {
+        let bridge = req.url?.host?.hasSuffix(".app.github.dev") == true
         let task = session.dataTask(with: req) { data, response, error in
             var result: Result<JSON, Error>
             if let error = error { result = .failure(error) }
             else if let http = response as? HTTPURLResponse {
                 let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? JSON
                 if !(200..<300).contains(http.statusCode) {
-                    result = .failure(PocketError(message: (j?["message"] as? String) ?? (j?["error_description"] as? String) ?? (j?["error"] as? String) ?? "HTTP \(http.statusCode)：请检查登录授权、连接密钥及私有端口转发"))
+                    result = .failure(Self.responseError(status: http.statusCode, json: j, bridge: bridge))
                 } else if let j = j { result = .success(j) }
                 else if data?.isEmpty != false { result = .success([:]) }
                 else { result = .failure(PocketError(message: "服务器未返回 JSON；请检查地址是否为 Pocket Bridge 端口")) }
@@ -109,10 +126,24 @@ final class Pocket {
         guard expiry > 0 && expiry < Date().timeIntervalSince1970 + 120 else { completion(nil); return }
         refreshWaiters.append(completion); guard !refreshing else { return }; refreshing = true
         let refresh = Vault.read("refresh")
+        guard !refresh.isEmpty else {
+            refreshing = false; let waiters = refreshWaiters; refreshWaiters = []
+            waiters.forEach { $0(PocketError(message: "GitHub 授权已过期，请在「连接」重新登录。地址和 Bridge 密钥会保留。")) }; return
+        }
         oauth("login/oauth/access_token", values: ["client_id": clientID, "grant_type": "refresh_token", "refresh_token": refresh]) { result in
             var error: Error?
             do { let j = try result.get(); if let e = j["error"] as? String { throw PocketError(message: "登录已过期，请重新授权：\(e)") }; try self.storeOAuth(j) } catch let e { error = e }
             self.refreshing = false; let waiters = self.refreshWaiters; self.refreshWaiters = []; waiters.forEach { $0(error) }
+        }
+    }
+    func connect(completion: @escaping Reply) {
+        connected = false
+        // Saved credentials are not proof that the authorization is still valid.
+        request("user", github: true) { result in
+            switch result {
+            case .failure(let error): completion(.failure(error))
+            case .success: self.request("health", completion: completion)
+            }
         }
     }
     func request(_ path: String, query: [String: String] = [:], body: JSON? = nil, github: Bool = false, completion: @escaping Reply) {
@@ -126,7 +157,10 @@ final class Pocket {
                 if github {
                     guard !self.token.isEmpty else { throw PocketError(message: "请先到连接页登录 GitHub") }
                     req.setValue("Bearer " + self.token, forHTTPHeaderField: "Authorization"); req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-                } else { req.setValue(self.token, forHTTPHeaderField: "X-Github-Token"); req.setValue(self.key, forHTTPHeaderField: "X-Pocket-Key") }
+                } else {
+                    guard !self.token.isEmpty else { throw PocketError(message: "请先在「连接」登录 GitHub，私有端口需要 GitHub 授权。") }
+                    guard !self.key.isEmpty else { throw PocketError(message: "请填写该工作区的 Bridge 连接密钥。") }
+                    req.setValue(self.token, forHTTPHeaderField: "X-Github-Token"); req.setValue(self.key, forHTTPHeaderField: "X-Pocket-Key") }
                 if let body = body { req.httpMethod = "POST"; req.httpBody = try JSONSerialization.data(withJSONObject: body); req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
                 self.send(req, completion: completion)
             } catch { completion(.failure(error)) }

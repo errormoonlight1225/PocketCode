@@ -96,7 +96,8 @@ final class ConnectController: ListController, SFSafariViewControllerDelegate {
         if section == 3 { return "切换后立即生效并记住选择。账号、工作区和草稿保持共用。两种界面都支持 iOS 12。" }
         if section == 0 { return status }
         if section == 1 { return "支持粘贴 https://名称.github.dev，自动转换为 8765 私有端口。仍需在 Codespace 启动 Pocket Bridge。" }
-        return "iOS 12+ · UIKit 原生版 2.1。网页版 IDE 是否支持旧 Safari 由 GitHub 决定。"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        return "iOS 12+ · UIKit 原生版 \(version)。网页版 IDE 是否支持旧 Safari 由 GitHub 决定。"
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let i = indexPath.row
@@ -105,7 +106,7 @@ final class ConnectController: ListController, SFSafariViewControllerDelegate {
             c.accessoryType = Theme.classic == (i == 1) ? .checkmark : .none; return c
         }
         if indexPath.section == 0 {
-            return [cell("使用 GitHub 账号登录", detail: "官方设备授权；支持 GitHub 的密码和双重验证", arrow: true), cell("OAuth Client ID", detail: p.clientID.isEmpty ? "首次需配置自己的 OAuth 应用（不是密码）" : p.clientID, arrow: true), cell(code.isEmpty ? "授权码" : "复制授权码：" + code, detail: code.isEmpty ? "点击登录后显示" : "在 GitHub 官方授权页输入此码"), cell("使用已有 Token", detail: p.token.isEmpty ? "备用登录方式" : "已安全保存授权", arrow: true), cell("退出本机登录")][i]
+            return [cell("使用 GitHub 账号登录", detail: "官方设备授权；支持 GitHub 的密码和双重验证", arrow: true), cell("OAuth Client ID", detail: p.clientID.isEmpty ? "首次需配置自己的 OAuth 应用（不是密码）" : p.clientID, arrow: true), cell(code.isEmpty ? "授权码" : "复制授权码：" + code, detail: code.isEmpty ? "点击登录后显示" : "在 GitHub 官方授权页输入此码"), cell("使用已有 Token", detail: p.token.isEmpty ? "备用登录方式" : "授权已保存，连接时验证有效性", arrow: true), cell("退出本机登录")][i]
         }
         if indexPath.section == 1 { return [cell("工作区地址", detail: p.address.isEmpty ? "粘贴 .github.dev 地址" : p.address, arrow: true), cell("连接密钥", detail: p.key.isEmpty ? "Pocket Bridge 启动时显示" : "已保存", arrow: true), cell("连接工作区", detail: p.connected ? "已连接" : "使用私有端口连接原生编辑器", arrow: true)][i] }
         return i == 0 ? cell("安装和登录说明", arrow: true) : cell("在 Safari 打开工作区", detail: "可选入口；原生编辑不依赖网页 IDE", arrow: true)
@@ -150,7 +151,7 @@ final class ConnectController: ListController, SFSafariViewControllerDelegate {
             case 1: prompt("连接密钥", secure: true) { value in do { try self.p.saveSettings(address: self.p.address, key: value); self.tableView.reloadData() } catch { self.message(error.localizedDescription) } }
             default:
                 p.connected = false
-                p.request("health") { r in self.receive(r) { j in
+                p.connect { r in self.receive(r) { j in
                     guard j["version"] as? Int == 2 else { self.message("请运行 Pocket Bridge v2"); return }
                     self.p.connected = true; self.tableView.reloadData(); self.message("已连接：" + (j["name"] as? String ?? "工作区"))
                 } }
@@ -184,7 +185,7 @@ final class SpacesController: ListController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true); guard !spaces.isEmpty, let name = spaces[indexPath.row]["name"] as? String else { return }
         let a = UIAlertController(title: name, message: "选择工作区操作", preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "使用此工作区", style: .default) { _ in do { let next = try Pocket.bridgeAddress("https://\(name).github.dev"); try self.p.saveSettings(address: next, key: next == self.p.address ? self.p.key : ""); self.message("地址已设置。请在「连接」填写该工作区的 Bridge 密钥，然后连接。") } catch { self.message(error.localizedDescription) } })
+        a.addAction(UIAlertAction(title: "使用此工作区", style: .default) { _ in do { let next = try Pocket.bridgeAddress("https://\(name).github.dev"); try self.p.saveSettings(address: next, key: next == self.p.address ? self.p.key : ""); self.message(self.p.key.isEmpty ? "地址已设置。请在「连接」填写该工作区的 Bridge 密钥，然后连接。" : "已选中工作区，保留已有 Bridge 密钥。请在「连接」点击「连接工作区」。") } catch { self.message(error.localizedDescription) } })
         a.addAction(UIAlertAction(title: "启动", style: .default) { _ in self.confirm("启动 Codespace", "运行会消耗你的 GitHub Codespaces 配额。") { self.p.request("user/codespaces/\(name)/start", body: [:], github: true) { r in self.receive(r) { _ in self.refresh() } } } })
         a.addAction(UIAlertAction(title: "停止", style: .destructive) { _ in self.confirm("停止 Codespace", "将中断此工作区的运行任务。") { self.p.request("user/codespaces/\(name)/stop", body: [:], github: true) { r in self.receive(r) { _ in self.p.connected = false; self.refresh() } } } })
         a.addAction(UIAlertAction(title: "取消", style: .cancel)); present(a, animated: true)
