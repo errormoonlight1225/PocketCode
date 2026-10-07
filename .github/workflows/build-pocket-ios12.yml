@@ -5,6 +5,7 @@ on:
     paths:
       - 'pocket-code/**'
       - 'install.sh'
+      - '.devcontainer/**'
       - '.github/workflows/build-pocket-ios12.yml'
 permissions:
   contents: read
@@ -13,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: bash -n install.sh
+      - run: bash -n install.sh .devcontainer/start-bridge.sh
       - run: python3 pocket-code/bridge/test_installer.py
       - run: python3 pocket-code/bridge/test_bridge.py
   build:

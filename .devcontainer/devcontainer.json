@@ -1,0 +1,9 @@
+{
+  "name": "Pocket Code",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "forwardPorts": [8765],
+  "portsAttributes": {
+    "8765": { "label": "Pocket Bridge", "onAutoForward": "silent" }
+  },
+  "postStartCommand": "bash .devcontainer/start-bridge.sh"
+}
