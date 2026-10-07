@@ -9,13 +9,15 @@ class Problem(Exception):
     def __init__(self, message, code=400): self.message, self.code = message, code
 
 class Terminal:
-    def __init__(self, root):
+    def __init__(self, root, cols=80, rows=24):
         self.lock = threading.Lock(); self.write_lock = threading.Lock(); self.buffer = bytearray(); self.base = 0; self.closed = False
+        size=struct.pack('HHHH',max(2,min(300,int(rows))),max(2,min(500,int(cols))),0,0)
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            fcntl.ioctl(0,termios.TIOCSWINSZ,size)
             os.chdir(root); os.environ.update(TERM='xterm-256color', COLORTERM='truecolor')
             os.execv('/bin/bash', ['bash', '-l'])
-        self.resize(80, 24)
+        self.resize(cols, rows)
         threading.Thread(target=self.read, daemon=True).start()
     def read(self):
         try:
@@ -119,7 +121,7 @@ class State:
         if route=='/terminal/new' and method=='POST':
             with self.lock:
                 if len(self.sessions)>=8: raise Problem('终端会话数量已达上限，请关闭旧会话',429)
-                sid=str(uuid.uuid4()); self.sessions[sid]=Terminal(str(self.root)); return dict(id=sid)
+                sid=str(uuid.uuid4()); self.sessions[sid]=Terminal(str(self.root),b.get('cols',80),b.get('rows',24)); return dict(id=sid)
         if route.startswith('/terminal/'):
             sid=b.get('id') or q.get('id',[''])[0]; term=self.sessions.get(sid)
             if not term: raise Problem('终端会话不存在，请新建会话',404)

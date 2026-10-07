@@ -14,7 +14,18 @@ final class ANSIScreen {
     var response: ((Data) -> Void)?
     var wrapPending = false
     var bracketedPaste = false
-    func reset() { grid = Array(repeating: blank(), count: rows); x = 0; y = 0; top = 0; bottom = rows - 1; state = 0; history = []; alternate = nil; wrapPending = false; bracketedPaste = false }
+    var cursorVisible = true
+    func reset(clearPending: Bool = true) { if clearPending { pending = [] }; grid = Array(repeating: blank(), count: rows); x = 0; y = 0; top = 0; bottom = rows - 1; state = 0; history = []; alternate = nil; wrapPending = false; bracketedPaste = false; cursorVisible = true; savedX = 0; savedY = 0; escape = "" }
+    static func cellWidth(_ text: String) -> Int {
+        guard let scalar = text.unicodeScalars.first else { return 1 }
+        let n = scalar.value
+        return n >= 0x1100 && (n <= 0x115F || (n >= 0x2E80 && n <= 0xA4CF) || (n >= 0xAC00 && n <= 0xD7A3) || (n >= 0xF900 && n <= 0xFAFF) || (n >= 0xFF01 && n <= 0xFF60) || n >= 0x1F300) ? 2 : 1
+    }
+    static func cells(_ text: String) -> [String] {
+        var result: [String] = []
+        for c in text { let value = String(c); result.append(value); if cellWidth(value) == 2 { result.append("") } }
+        return result
+    }
     func blank() -> [String] { Array(repeating: " ", count: cols) }
     func resize(_ width: Int, _ height: Int) {
         let width = max(10, width), height = max(3, height)
@@ -63,7 +74,7 @@ final class ANSIScreen {
             case 56: x = min(cols - 1, savedX); y = min(rows - 1, savedY)
             case 68: newline()
             case 77: if y == top { grid.remove(at: bottom); grid.insert(blank(), at: top) } else { y = max(0, y - 1) }
-            case 99: reset()
+            case 99: reset(clearPending: false)
             default: break
             }; return
         }
@@ -80,7 +91,7 @@ final class ANSIScreen {
         case 0...31, 127: break
         default:
             if CharacterSet.nonBaseCharacters.contains(scalar) { grid[y][max(0, x - 1)] += String(scalar); return }
-            let wide = n >= 0x1100 && (n <= 0x115F || (n >= 0x2E80 && n <= 0xA4CF) || (n >= 0xAC00 && n <= 0xD7A3) || (n >= 0xF900 && n <= 0xFAFF) || (n >= 0xFF01 && n <= 0xFF60) || n >= 0x1F300)
+            let wide = Self.cellWidth(String(scalar)) == 2
             if wrapPending || (wide && x == cols - 1) { x = 0; newline() }
             grid[y][x] = String(scalar)
             if wide && x + 1 < cols { grid[y][x + 1] = "" }
@@ -90,7 +101,7 @@ final class ANSIScreen {
     func csi(_ final: Character) {
         let privateMode = escape.hasPrefix("?")
         let parts = escape.trimmingCharacters(in: CharacterSet(charactersIn: "?>!" )).split(separator: ";", omittingEmptySubsequences: false).map { Int($0) ?? 0 }
-        let n = max(1, parts.first ?? 1)
+        let n = min(max(cols, rows), max(1, parts.first ?? 1))
         func at(_ i: Int) -> Int { i < parts.count ? parts[i] : 0 }
         switch final {
         case "A": y = max(0, y - n)
@@ -120,6 +131,7 @@ final class ANSIScreen {
         case "n": if at(0) == 6 { response?(Data("\u{1b}[\(y + 1);\(x + 1)R".utf8)) } else if at(0) == 5 { response?(Data("\u{1b}[0n".utf8)) }
         case "c": response?(Data("\u{1b}[?1;2c".utf8))
         case "h", "l":
+            if privateMode && parts.contains(25) { cursorVisible = final == "h" }
             if privateMode && parts.contains(2004) { bracketedPaste = final == "h" }
             if privateMode && parts.contains(where: { [47, 1047, 1049].contains($0) }) {
             if final == "h" && alternate == nil { alternate = grid; savedX = x; savedY = y; grid = Array(repeating: blank(), count: rows); x = 0; y = 0 }

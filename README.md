@@ -2,7 +2,7 @@
 
 [完整源码](pocket-code) · [MIT 许可证](pocket-code/LICENSE) · [编译记录与 IPA](https://github.com/errormoonlight1225/PocketCode/actions/workflows/build-pocket-ios12.yml)
 
-原生 UIKit 文件浏览、编辑器、基础 ANSI 终端和 Git 操作。支持「新版深色底部导航 / 经典浅色列表」切换，GitHub 官方设备授权登录；不会读取你的 GitHub 密码。
+原生 UIKit 文件浏览、编辑器、按字符格绘制的 ANSI 终端和 Git 操作。支持「新版深色底部导航 / 经典浅色列表」切换，GitHub 官方设备授权登录；不会读取你的 GitHub 密码。
 
 ## 一键安装连接服务
 
@@ -111,3 +111,7 @@ python3 pocket-code/bridge/test_bridge.py
 已有 Codespace 拉取本次更新后，需要执行一次 **Codespaces: Rebuild Container** 才会应用新配置；请先保存正在进行的工作。之后停止再启动 Codespace，无需手动启动 Bridge。立即启动也可执行 `bash .devcontainer/start-bridge.sh`。自启动输出不会显示连接密钥，使用 `~/.local/bin/pocket-code info` 单独查看。
 
 自启动不会唤醒已停止的 Codespace，也不会阻止其自动休眠。
+
+## 2.2 终端修复
+
+输出由原生字符格画布绘制，键盘不再编辑显示文本，避免系统插入光标引发横向滚动和输出重排。长按可以复制当前屏幕或粘贴，双指调整字号。仅绘制可见区域，历史缓存不会生成超高画布。新 Shell 使用手机当前行列数启动，缩放及键盘尺寸请求按顺序发送。仍是基础 ANSI；复杂全屏 TUI、组合 emoji 和部分输入法需真机继续验证。

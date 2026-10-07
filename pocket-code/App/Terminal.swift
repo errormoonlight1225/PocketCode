@@ -1,17 +1,66 @@
 import UIKit
 
-final class TerminalText: UITextView {
+// The terminal owns its cells. UIKit's editable text storage must not own the cursor.
+final class TerminalText: UIScrollView, UIKeyInput, UITextInputTraits {
     var output: ((Data) -> Void)?
     var pasteText: ((String) -> Void)?
-    override func paste(_ sender: Any?) { if let value = UIPasteboard.general.string { pasteText?(value) } }
-    override func cut(_ sender: Any?) { copy(sender) }
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(paste(_:)) { return UIPasteboard.general.hasStrings }
-        if action == #selector(cut(_:)) { return false }
-        return super.canPerformAction(action, withSender: sender)
+    var font = Theme.mono(12) { didSet { updateSize() } }
+    var keyboardAppearance: UIKeyboardAppearance = .dark
+    var autocorrectionType: UITextAutocorrectionType = .no
+    var autocapitalizationType: UITextAutocapitalizationType = .none
+    var smartQuotesType: UITextSmartQuotesType = .no
+    var smartDashesType: UITextSmartDashesType = .no
+    var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
+    var keyboardType: UIKeyboardType = .default
+    var accessory: UIView?
+    override var inputAccessoryView: UIView? { accessory }
+    override var canBecomeFirstResponder: Bool { true }
+    var hasText: Bool { true }
+    var lines: [[String]] = []
+    var cursor = CGPoint.zero
+    var cursorVisible = true
+    let canvas = TerminalCanvas()
+    var cellWidth: CGFloat { ceil(("M" as NSString).size(withAttributes: [.font: font]).width) }
+    var cellHeight: CGFloat { ceil(font.lineHeight) }
+    override init(frame: CGRect) {
+        super.init(frame: frame); backgroundColor = .black; canvas.owner = self; addSubview(canvas)
+        showsHorizontalScrollIndicator = false; isDirectionalLockEnabled = true
+        contentInsetAdjustmentBehavior = .never
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(focus)))
+        addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(menu(_:))))
     }
-    override func insertText(_ text: String) { output?(Data(text.replacingOccurrences(of: "\n", with: "\r").utf8)) }
-    override func deleteBackward() { output?(Data([127])) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc func focus() { becomeFirstResponder(); canvas.setNeedsDisplay() }
+    @objc func menu(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }; becomeFirstResponder()
+        UIMenuController.shared.setTargetRect(CGRect(origin: gesture.location(in: self), size: CGSize(width: 1, height: 1)), in: self)
+        UIMenuController.shared.setMenuVisible(true, animated: true)
+    }
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        action == #selector(copy(_:)) || (action == #selector(paste(_:)) && UIPasteboard.general.hasStrings)
+    }
+    override func copy(_ sender: Any?) {
+        let first = max(0, Int(contentOffset.y / cellHeight))
+        let last = min(lines.count, first + Int(ceil(bounds.height / cellHeight)))
+        guard first < last else { return }
+        UIPasteboard.general.string = lines[first..<last].map { $0.joined().trimmingCharacters(in: .whitespaces) }.joined(separator: "\n")
+    }
+    override func paste(_ sender: Any?) { if let value = UIPasteboard.general.string { pasteText?(value) } }
+    func insertText(_ text: String) { output?(Data(text.replacingOccurrences(of: "\n", with: "\r").utf8)) }
+    func deleteBackward() { output?(Data([127])) }
+    func display(_ screen: ANSIScreen) {
+        lines = (screen.alternate == nil ? screen.history.map { ANSIScreen.cells($0) } : []) + screen.grid
+        cursor = CGPoint(x: CGFloat(screen.x), y: CGFloat((screen.alternate == nil ? screen.history.count : 0) + screen.y))
+        cursorVisible = screen.cursorVisible
+        updateSize()
+    }
+    func updateSize() {
+        let size = CGSize(width: bounds.width, height: max(bounds.height, CGFloat(lines.count) * cellHeight + 8))
+        if contentSize != size { contentSize = size }
+        canvas.frame = CGRect(x: 0, y: contentOffset.y, width: bounds.width, height: bounds.height)
+        canvas.setNeedsDisplay()
+    }
+    override func layoutSubviews() { super.layoutSubviews(); updateSize(); if contentOffset.x != 0 { contentOffset.x = 0 } }
     override var keyCommands: [UIKeyCommand]? {
         let items: [(String, UIKeyModifierFlags)] = [(UIKeyCommand.inputUpArrow, []), (UIKeyCommand.inputDownArrow, []), (UIKeyCommand.inputLeftArrow, []), (UIKeyCommand.inputRightArrow, []), (UIKeyCommand.inputEscape, []), ("c", .control), ("d", .control), ("a", .control), ("e", .control), ("l", .control), ("u", .control), ("w", .control), ("z", .control), ("\t", [])]
         return items.map { UIKeyCommand(input: $0.0, modifierFlags: $0.1, action: #selector(key(_:))) }
@@ -22,10 +71,32 @@ final class TerminalText: UITextView {
         if command.modifierFlags.contains(.control), let byte = key.utf8.first { output?(Data([byte & 31])) } else if let value = arrows[key] { output?(Data(value.utf8)) }
     }
 }
+final class TerminalCanvas: UIView {
+    weak var owner: TerminalText?
+    override func draw(_ rect: CGRect) {
+        guard let t = owner, let context = UIGraphicsGetCurrentContext() else { return }
+        UIColor.black.setFill(); context.fill(rect)
+        let first = max(0, Int((rect.minY + t.contentOffset.y - 4) / t.cellHeight))
+        let last = min(t.lines.count, Int(ceil((rect.maxY + t.contentOffset.y) / t.cellHeight)))
+        guard first < last else { return }
+        for row in first..<last {
+            for (col, value) in t.lines[row].enumerated() where value != " " && !value.isEmpty {
+                let cell = CGRect(x: 4 + CGFloat(col) * t.cellWidth, y: 4 + CGFloat(row) * t.cellHeight - t.contentOffset.y, width: t.cellWidth * CGFloat(ANSIScreen.cellWidth(value)), height: t.cellHeight)
+                context.saveGState(); context.clip(to: cell)
+                (value as NSString).draw(at: cell.origin, withAttributes: [.font: t.font, .foregroundColor: Theme.mint])
+                context.restoreGState()
+            }
+        }
+        if t.isFirstResponder && t.cursorVisible {
+            Theme.mint.withAlphaComponent(0.55).setFill()
+            context.fill(CGRect(x: 4 + t.cursor.x * t.cellWidth, y: 4 + t.cursor.y * t.cellHeight - t.contentOffset.y, width: t.cellWidth, height: t.cellHeight))
+        }
+    }
+}
 final class TerminalController: UIViewController {
     let p = Pocket.shared
     let screen = ANSIScreen()
-    let terminal = TerminalText()
+    let terminal = TerminalText(frame: .zero)
     let status = UILabel()
     var bottom: NSLayoutConstraint!
     var active = false, loading = false, sending = false, creating = false
@@ -33,6 +104,8 @@ final class TerminalController: UIViewController {
     var queued: [Data] = []
     var keys: [String] = []
     var failures = 0
+    var resizing = false
+    var pendingResize: (String, Int, Int, Int)?
     var fontSize: CGFloat = CGFloat(UserDefaults.standard.double(forKey: "terminalFontSize"))
     var pinchStart: CGFloat = 12
     var followOutput = true
@@ -40,16 +113,10 @@ final class TerminalController: UIViewController {
     var terminalFont: UIFont { Theme.mono(fontSize) }
     func render() {
         let previousOffset = terminal.contentOffset
-        let previousSelection = terminal.selectedRange
-        terminal.text = screen.text
-        if terminal.isFirstResponder {
-            terminal.selectedRange = NSRange(location: min(screen.cursorOffset, terminal.text.utf16.count), length: 0)
-        } else if previousSelection.length > 0 && NSMaxRange(previousSelection) <= terminal.text.utf16.count {
-            terminal.selectedRange = previousSelection
-        }
+        terminal.display(screen)
         terminal.layoutIfNeeded()
         if followOutput { scrollToBottom() } else {
-            terminal.setContentOffset(CGPoint(x: previousOffset.x, y: min(previousOffset.y, max(0, terminal.contentSize.height - terminal.bounds.height))), animated: false)
+            terminal.setContentOffset(CGPoint(x: 0, y: min(previousOffset.y, max(0, terminal.contentSize.height - terminal.bounds.height))), animated: false)
         }
     }
     func scrollToBottom() {
@@ -80,15 +147,13 @@ final class TerminalController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad(); view.backgroundColor = Theme.background
         if fontSize < 9 || fontSize > 24 { fontSize = 12 }
-        terminal.backgroundColor = .black; terminal.textColor = Theme.mint; terminal.font = terminalFont; terminal.autocorrectionType = .no; terminal.autocapitalizationType = .none; terminal.smartQuotesType = .no; terminal.smartDashesType = .no; terminal.keyboardAppearance = .dark
+        terminal.backgroundColor = .black; terminal.font = terminalFont; terminal.autocorrectionType = .no; terminal.autocapitalizationType = .none; terminal.smartQuotesType = .no; terminal.smartDashesType = .no; terminal.keyboardAppearance = .dark
         terminal.smartInsertDeleteType = .no
         terminal.keyboardDismissMode = .interactive
-        terminal.textContainer.lineFragmentPadding = 0
         terminal.alwaysBounceVertical = true
         terminal.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:))))
         terminal.panGestureRecognizer.addTarget(self, action: #selector(beganScroll(_:)))
         terminal.pasteText = { [weak self] value in self?.pasteInput(value) }
-        terminal.textContainer.widthTracksTextView = false; terminal.textContainer.size = CGSize(width: 10000, height: CGFloat.greatestFiniteMagnitude); terminal.textContainerInset = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
         terminal.output = { [weak self] data in self?.queue(data) }; screen.response = { [weak self] data in self?.queue(data, follow: false) }
         live.setTitle("↓ 回到底部", for: .normal); live.tintColor = Theme.mint; live.backgroundColor = .black; live.layer.cornerRadius = 12; live.isHidden = true
         live.addTarget(self, action: #selector(showLatest), for: .touchUpInside)
@@ -106,7 +171,7 @@ final class TerminalController: UIViewController {
         let accessory = UIScrollView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
         accessory.autoresizingMask = [.flexibleWidth]; accessory.showsHorizontalScrollIndicator = false; accessory.alwaysBounceHorizontal = true
         bar.frame = CGRect(x: 0, y: 0, width: max(660, view.bounds.width), height: 44)
-        accessory.addSubview(bar); accessory.contentSize = bar.bounds.size; terminal.inputAccessoryView = accessory
+        accessory.addSubview(bar); accessory.contentSize = bar.bounds.size; terminal.accessory = accessory
         NotificationCenter.default.addObserver(self, selector: #selector(keyboard(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(pause), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.didBecomeActiveNotification, object: nil)
@@ -117,10 +182,24 @@ final class TerminalController: UIViewController {
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); resize() }
     func resize() {
         guard terminal.bounds.width > 0, terminal.bounds.height > 0 else { return }
-        let width = max(10, Int((terminal.bounds.width - terminal.textContainerInset.left - terminal.textContainerInset.right) / ("M" as NSString).size(withAttributes: [.font: terminalFont]).width))
-        let height = max(3, Int((terminal.bounds.height - terminal.textContainerInset.top - terminal.textContainerInset.bottom) / terminalFont.lineHeight))
+        let width = max(10, Int((terminal.bounds.width - 8) / terminal.cellWidth))
+        let height = max(3, Int((terminal.bounds.height - 8) / terminal.cellHeight))
         guard width != screen.cols || height != screen.rows else { return }; screen.resize(width, height); render()
-        if active, let id = p.terminalID { p.request("terminal/resize", body: ["id": id, "cols": width, "rows": height]) { _ in } }
+        if active, let id = p.terminalID { sendResize(id: id, cols: width, rows: height) }
+    }
+    func sendResize(id: String, cols: Int, rows: Int) {
+        pendingResize = (id, cols, rows, p.terminalGeneration); flushResize()
+    }
+    func flushResize() {
+        guard !resizing, let size = pendingResize else { return }
+        pendingResize = nil
+        guard size.3 == p.terminalGeneration, size.0 == p.terminalID else { return }
+        resizing = true
+        p.request("terminal/resize", body: ["id": size.0, "cols": size.1, "rows": size.2]) { result in
+            self.resizing = false
+            if size.3 == self.p.terminalGeneration, case .failure(let error) = result { self.status.text = "调整终端失败：" + error.localizedDescription }
+            self.flushResize()
+        }
     }
     @objc func keyboard(_ n: Notification) {
         guard let f = n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
@@ -133,24 +212,24 @@ final class TerminalController: UIViewController {
         UIView.animate(withDuration: duration, delay: 0, options: UIView.AnimationOptions(rawValue: curve << 16), animations: { self.view.layoutIfNeeded() })
     }
     @objc func special(_ b: UIBarButtonItem) { queue(Data(keys[b.tag].utf8)) }
-    @objc func toggleKeyboard() { if terminal.isFirstResponder { terminal.resignFirstResponder() } else { terminal.becomeFirstResponder(); resume() } }
+    @objc func toggleKeyboard() { if terminal.isFirstResponder { terminal.resignFirstResponder(); terminal.canvas.setNeedsDisplay() } else { terminal.becomeFirstResponder(); terminal.canvas.setNeedsDisplay(); resume() } }
     @objc func pause() { active = false; generation += 1; loading = false }
     @objc func resume() {
         guard viewIfLoaded?.window != nil, p.connected, !active else { return }
-        if workspaceGeneration != p.terminalGeneration { screen.reset(); terminal.text = ""; offset = 0; queued = []; workspaceGeneration = p.terminalGeneration }
+        if workspaceGeneration != p.terminalGeneration { screen.reset(); terminal.display(screen); offset = 0; queued = []; workspaceGeneration = p.terminalGeneration }
         active = true; generation += 1; let g = generation; failures = 0
         if p.terminalID == nil {
             guard !creating else { return }; creating = true
             status.text = "正在创建原生 PTY…"
             let wg = p.terminalGeneration
-            p.request("terminal/new", body: [:]) { r in
+            p.request("terminal/new", body: ["cols": screen.cols, "rows": screen.rows]) { r in
                 self.creating = false
                 do {
                     let j = try r.get(); guard let id = j["id"] as? String else { throw PocketError(message: "没有收到终端 ID") }
                     guard wg == self.p.terminalGeneration else { return }
                     // Retain a created shell even if the view was temporarily hidden.
                     self.p.terminalID = id; self.offset = 0
-                    self.p.request("terminal/resize", body: ["id": id, "cols": self.screen.cols, "rows": self.screen.rows]) { _ in }
+                    self.sendResize(id: id, cols: self.screen.cols, rows: self.screen.rows)
                     if self.active { self.poll(self.generation) }
                 } catch { if self.generation == g { self.status.text = error.localizedDescription; self.active = false } }
             }
