@@ -103,3 +103,11 @@ python3 pocket-code/bridge/test_bridge.py
 `pocket-code/`、`install.sh` 和本说明按 [MIT](pocket-code/LICENSE) 开源。GitHub 及 Codespaces 的商标归各自权利人所有。
 
 旧仓库文件已按原路径收录于 [`legacy/Ipa-Build/`](legacy/Ipa-Build/)，作为历史版本保留。当前开发、安装和构建以根目录及 `pocket-code/` 为准。
+
+## Bridge 自启动
+
+本仓库的 `.devcontainer/devcontainer.json` 在 Codespace 每次启动后运行本地安装脚本，自动启动 Bridge 并保留现有密钥。8765 端口保持 Private。
+
+已有 Codespace 拉取本次更新后，需要执行一次 **Codespaces: Rebuild Container** 才会应用新配置；请先保存正在进行的工作。之后停止再启动 Codespace，无需手动启动 Bridge。立即启动也可执行 `bash .devcontainer/start-bridge.sh`。自启动输出不会显示连接密钥，使用 `~/.local/bin/pocket-code info` 单独查看。
+
+自启动不会唤醒已停止的 Codespace，也不会阻止其自动休眠。

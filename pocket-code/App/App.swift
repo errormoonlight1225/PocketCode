@@ -184,7 +184,7 @@ final class SpacesController: ListController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true); guard !spaces.isEmpty, let name = spaces[indexPath.row]["name"] as? String else { return }
         let a = UIAlertController(title: name, message: "选择工作区操作", preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "使用此工作区", style: .default) { _ in do { try self.p.saveSettings(address: "https://\(name).github.dev", key: ""); self.message("地址已设置。请在「连接」填写该工作区的 Bridge 密钥，然后连接。") } catch { self.message(error.localizedDescription) } })
+        a.addAction(UIAlertAction(title: "使用此工作区", style: .default) { _ in do { let next = try Pocket.bridgeAddress("https://\(name).github.dev"); try self.p.saveSettings(address: next, key: next == self.p.address ? self.p.key : ""); self.message("地址已设置。请在「连接」填写该工作区的 Bridge 密钥，然后连接。") } catch { self.message(error.localizedDescription) } })
         a.addAction(UIAlertAction(title: "启动", style: .default) { _ in self.confirm("启动 Codespace", "运行会消耗你的 GitHub Codespaces 配额。") { self.p.request("user/codespaces/\(name)/start", body: [:], github: true) { r in self.receive(r) { _ in self.refresh() } } } })
         a.addAction(UIAlertAction(title: "停止", style: .destructive) { _ in self.confirm("停止 Codespace", "将中断此工作区的运行任务。") { self.p.request("user/codespaces/\(name)/stop", body: [:], github: true) { r in self.receive(r) { _ in self.p.connected = false; self.refresh() } } } })
         a.addAction(UIAlertAction(title: "取消", style: .cancel)); present(a, animated: true)

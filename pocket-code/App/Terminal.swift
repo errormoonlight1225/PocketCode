@@ -89,7 +89,7 @@ final class TerminalController: UIViewController {
         terminal.panGestureRecognizer.addTarget(self, action: #selector(beganScroll(_:)))
         terminal.pasteText = { [weak self] value in self?.pasteInput(value) }
         terminal.textContainer.widthTracksTextView = false; terminal.textContainer.size = CGSize(width: 10000, height: CGFloat.greatestFiniteMagnitude); terminal.textContainerInset = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
-        terminal.output = { [weak self] data in self?.queue(data) }; screen.response = terminal.output
+        terminal.output = { [weak self] data in self?.queue(data) }; screen.response = { [weak self] data in self?.queue(data, follow: false) }
         live.setTitle("↓ 回到底部", for: .normal); live.tintColor = Theme.mint; live.backgroundColor = .black; live.layer.cornerRadius = 12; live.isHidden = true
         live.addTarget(self, action: #selector(showLatest), for: .touchUpInside)
         live.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(live)
@@ -175,7 +175,7 @@ final class TerminalController: UIViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + (self.failures == 0 ? 0.2 : 2)) { [weak self] in self?.poll(g) }
         }
     }
-    func queue(_ data: Data) { showLatest(); guard p.connected, p.terminalID != nil, workspaceGeneration == p.terminalGeneration else { return }; if queued.reduce(0, { $0 + $1.count }) + data.count > 65536 { status.text = "待发送内容过多，请稍后再试"; return }; queued.append(data); flush() }
+    func queue(_ data: Data, follow: Bool = true) { if follow { showLatest() }; guard p.connected, p.terminalID != nil, workspaceGeneration == p.terminalGeneration else { return }; if queued.reduce(0, { $0 + $1.count }) + data.count > 65536 { status.text = "待发送内容过多，请稍后再试"; return }; queued.append(data); flush() }
     func flush() {
         guard !sending, !queued.isEmpty, let id = p.terminalID, workspaceGeneration == p.terminalGeneration else { return }
         sending = true; let data = queued.removeFirst(); let wg = workspaceGeneration
